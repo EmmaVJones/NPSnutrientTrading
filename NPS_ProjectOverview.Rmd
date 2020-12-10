@@ -1,0 +1,46 @@
+---
+title: "Project Overview"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+# written in R 3.6.2
+
+library(tidyverse)
+library(sf)
+library(config)
+library(pins)
+library(pool)
+library(DBI) # for dataset testing but use pool for any real work
+
+```
+
+## Background
+
+Jason data request 12/3/2020:
+
+"We're going to create two data sets (with Station ID, Lat, Long, median TN, median TP) by identifying stations from the last ten years where the median values of TN are less than 1 mg/L and TP less than 0.05 mg/L and a list of stations were median values of TN are over 2 mg/L or where the TP is over 0.1 mg/L.
+
+Note the "low" nutrient stations need to have low TN and TP and the "high" nutrient station could be categorized as high by having a high TN or high TP. "
+
+
+## Establish connection to ODS
+
+```{r ODS connection}
+
+```
+
+
+
+```{r}
+# To join analytes with field data you need the Fdt_ID i.e. Ana_Sam_Fdt_Id =Fdt_Id
+DCLS_Analytes= pool %>% tbl("Wqm_Analytes_View") %>%
+filter(Ana_Sam_Fdt_Id %in% !!ProbMon_Fdt_Ids$Fdt_Id) %>%
+as_tibble()%>%
+left_join(ProbMon_Fdt_Ids,by=c("Ana_Sam_Fdt_Id"="Fdt_Id"))%>%
+mutate(Year=year(Ana_Received_Date)) 
+```
+
+
