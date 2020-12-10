@@ -110,6 +110,12 @@ stationSummary <- stationNutrientData %>%
            crs = 4326) 
 
 ```
+Clean up workspace before moving on.
+
+```{r}
+rm(stationAnalyteData); rm(stationFieldData); rm(stationGeospatial); rm(stationNutrientData); rm(stationSummary);rm(station)
+```
+
 
 
 
@@ -119,10 +125,10 @@ First we want to only pull info from stations that have analyte data in the last
 
 We need to break this up into multiple queries as to not blow up local memory or shut down ODS environment for everyone.
 
-```{r nutrients in last year}
-allNutrientData <- list()
+```{r nutrients in last 10 year}
+allNutrientDataList <- list()
 
-for(i in year(Sys.Date()) - 0:1){#0:10){
+for(i in year(Sys.Date()) - 0:10){
   print(paste('Pulling data from : ', i))
   
   analyteData <- pool %>% tbl("Wqm_Analytes_View") %>%
@@ -146,106 +152,86 @@ for(i in year(Sys.Date()) - 0:1){#0:10){
   
   # Save data to list
   
-  allNutrientData[[i]] <- list(nutrientData)
+  allNutrientDataList[[i]] <- list(nutrientData)
 }
 
-z <- purrr::map_df(allNutrientData, 1)
+# reorg and save data for later
+saveRDS(allNutrientDataList, 'data/allNutrientDataList.RDS')
+allNutrientData <- purrr::map_df(allNutrientDataList, 1)
+saveRDS(allNutrientData, 'data/allNutrientData.RDS')
+rm(analyteData); rm(i); rm(allNutrientDataList)
+```
+
+Now that we have a large dataset of all TP and TN data sampled in last 10 years, we can pull associated sample information.
+
+```{r pull sample information}
+# grab associated field data to get station name
+#fieldData <- pool %>% tbl("Wqm_Field_Data_View") %>%
+#  filter(Fdt_Id %in% !! unique(allNutrientData$Ana_Sam_Fdt_Id) ) %>%
+#  as_tibble()   
+# Query fails bc too large
 
 
-  
-  # grab associated field data to get station name
+# large amount of data so need to break this into multiple queries
+analyteInfo <- unique(allNutrientData$Ana_Sam_Fdt_Id)
+
+allFieldDataList <- list()
+
+for(i in seq(1, length(analyteInfo), by = 1000)){ 
+  print(i)
+  endPoint <- i + 999
   fieldData <- pool %>% tbl("Wqm_Field_Data_View") %>%
-    filter(Fdt_Id %in% !! nutrientData$Ana_Sam_Fdt_Id ) %>%
+    filter(Fdt_Id %in% !! analyteInfo[i:endPoint] ) %>%
     as_tibble() 
-  
-  print(paste( i, ' Field Data complete'))
+  allFieldDataList[[i]] <- list(fieldData)
+}
+# and then grab the last ones
+endPoint <- length(analyteInfo)
+fieldData <- pool %>% tbl("Wqm_Field_Data_View") %>%
+    filter(Fdt_Id %in% !! analyteInfo[i:endPoint] ) %>%
+    as_tibble() 
+allFieldDataList[[endPoint]] <- list(fieldData)
+saveRDS(allFieldDataList, 'data/allFieldDataList.RDS')
 
-  
-  geospatial <- pool %>% tbl("WQM_Sta_GIS_View") %>%
-    filter(Station_Id %in% !! unique(fieldData$Fdt_Sta_Id)) %>%
-    as_tibble()
-  
-  print(paste( i, ' Geospatial Data complete'))
-  
-  nutrientData <- nutrientData %>%
-  left_join(dplyr::select(fieldData, Fdt_Id, Fdt_Sta_Id, Fdt_Date_Time), by = c("Ana_Sam_Fdt_Id" = "Fdt_Id")) 
+allFieldData <- purrr::map_df(allFieldDataList, 1)
+saveRDS(allFieldData, 'data/allFieldData.RDS')
 
-  # all together now
-  yearlySummary <- nutrientData %>%
+    
+
+
+geospatialData <- pool %>% tbl("WQM_Sta_GIS_View") %>%
+  filter(Station_Id %in% !! unique(allFieldData$Fdt_Sta_Id)) %>%
+  as_tibble()
+saveRDS(geospatialData, 'data/geospatialData.RDS')
+
+# combine sample info with nutrient data
+allNutrientData <- allNutrientData %>%
+  left_join(dplyr::select(allFieldData, Fdt_Id, Fdt_Sta_Id, Fdt_Date_Time), by = c("Ana_Sam_Fdt_Id" = "Fdt_Id")) 
+saveRDS(allNutrientData, 'data/allNutrientData.RDS')
+
+# Clean up workspace
+rm(i);rm(endPoint);rm(fieldData);rm(allFieldData);rm(allFieldDataList); rm(analyteInfo)
+```
+
+Now we can analyze all this information.
+
+```{r summary stats}
+stationSummary <- allNutrientData %>%
     group_by(Fdt_Sta_Id) %>%
     filter(!is.na(NITROGEN)) %>%
     summarise(medianTN = median(NITROGEN, na.rm = T),
               nTN = n()) %>%
-    left_join(nutrientData %>% 
+    left_join(allNutrientData %>% 
                 group_by(Fdt_Sta_Id) %>%
                 filter(!is.na(PHOSPHORUS)) %>%
                 summarise(medianTP = median(PHOSPHORUS, na.rm = T),
                           nTP = n())) %>%
-    left_join(dplyr::select(geospatial, Station_Id, Latitude, Longitude, Deq_Region, County_City, Basin, Huc6_Vahu6, Huc6_Huc_8_Name),
+    left_join(dplyr::select(geospatialData, Station_Id, Latitude, Longitude, Deq_Region, County_City, Basin, Huc6_Vahu6, Huc6_Huc_8_Name),
               by = c('Fdt_Sta_Id' = 'Station_Id'))
   
-  # Save data to list
-  
-  allYearlySummary[[i]] <- list(yearlySummary)
-
-
-}
-
+# some people may not want spatial info tacked on so separate that step
+stationSummary_sf <- stationSummary %>%
+  st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
+           remove = F, # dont remove these lat/lon cols from df
+           crs = 4326) 
 ```
-
-
-```{r}
-analyteData <- pool %>% tbl("Wqm_Analytes_View") %>%
-  filter(year(Ana_Received_Date) >= year(!! Sys.Date()) - 0 &
-    #Ana_Sam_Fdt_Id %in% !! stationFieldData$Fdt_Id & # for testing
-           Pg_Storet_Code %in% c('00600', '00665') ) %>% # limit to last 10 years of data on database side
-  as_tibble()
-
-nutrientData <- analyteData %>%
-    group_by(Ana_Sam_Fdt_Id)%>%
-    filter(Pg_Storet_Code == '00600' )%>%
-    summarise(NITROGEN = sum(Ana_Value)) %>% # use conventionals new naming format
-  left_join(analyteData %>%
-              group_by(Ana_Sam_Fdt_Id)%>%
-              filter(Pg_Storet_Code == '00665' ) %>%
-              summarise(PHOSPHORUS = sum(Ana_Value)), # use conventionals new naming format
-            by = c('Ana_Sam_Fdt_Id')) %>%
-  ungroup()
-
-# grab associated field data to get station name
-fieldData <- pool %>% tbl("Wqm_Field_Data_View") %>%
-  filter(Fdt_Id %in% !! nutrientData$Ana_Sam_Fdt_Id ) %>%
-  as_tibble() 
-
-geospatial <- pool %>% tbl("WQM_Sta_GIS_View") %>%
-  filter(Station_Id %in% !! unique(fieldData$Fdt_Sta_Id)) %>%
-  as_tibble()
-
-nutrientData <- nutrientData %>%
-  left_join(dplyr::select(fieldData, Fdt_Id, Fdt_Sta_Id, Fdt_Date_Time), by = c("Ana_Sam_Fdt_Id" = "Fdt_Id")) 
-
-
-# all together now
-yearlySummary <- nutrientData %>%
-  group_by(Fdt_Sta_Id) %>%
-  filter(!is.na(NITROGEN)) %>%
-  summarise(medianTN = median(NITROGEN, na.rm = T),
-            nTN = n()) %>%
-  left_join(nutrientData %>% 
-              group_by(Fdt_Sta_Id) %>%
-              filter(!is.na(PHOSPHORUS)) %>%
-              summarise(medianTP = median(PHOSPHORUS, na.rm = T),
-                        nTP = n())) %>%
-  left_join(dplyr::select(geospatial, Station_Id, Latitude, Longitude, Deq_Region, County_City, Basin, Huc6_Vahu6, Huc6_Huc_8_Name),
-            by = c('Fdt_Sta_Id' = 'Station_Id')) # %>%
-  #st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
-   #        remove = F, # dont remove these lat/lon cols from df
-   #        crs = 4326) 
-
-
-#allYearlySummary[[1]] <- list(yearlySummary)
-#allYearlySummary[[2]] <- list(yearlySummary)
-
-z <- purrr::map_df(allYearlySummary, 1)
-```
-
