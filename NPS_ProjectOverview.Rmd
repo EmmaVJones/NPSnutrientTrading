@@ -115,4 +115,25 @@ stationSummary <- stationNutrientData %>%
 
 ## Multistation Data Query
 
-First we want to only pull info from stations that have TN or TP data in the last 10 years.
+First we want to only pull info from stations that have analyte data in the last 10 years.
+
+We need to break this up into multiple queries as to not blow up local memory or shut down ODS environment for everyone.
+
+```{r nutrients in last year}
+analyteData <- pool %>% tbl("Wqm_Analytes_View") %>%
+  filter(year(Ana_Received_Date) >= year(!! Sys.Date()) - 0 &
+    #Ana_Sam_Fdt_Id %in% !! stationFieldData$Fdt_Id & # for testing
+           Pg_Storet_Code %in% c('00600', '00665') ) %>% # limit to last 10 years of data on database side
+  as_tibble()
+# grab associated field data to get station name
+fieldData <- pool %>% tbl("Wqm_Field_Data_View") %>%
+  filter(Fdt_Id %in% !! analyteData$Ana_Sam_Fdt_Id &
+           year(Fdt_Date_Time) >= year(!! Sys.Date()) - 0) %>% # limit to last 10 years of data on database side
+  as_tibble() 
+
+geospatial <- pool %>% tbl("WQM_Sta_GIS_View") %>%
+  filter(Station_Id %in% !! unique(fieldData$Fdt_Sta_Id)) %>%
+  as_tibble()
+
+```
+
