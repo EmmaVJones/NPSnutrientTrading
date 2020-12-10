@@ -234,4 +234,146 @@ stationSummary_sf <- stationSummary %>%
   st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
            remove = F, # dont remove these lat/lon cols from df
            crs = 4326) 
+
+saveRDS(stationSummary, 'data/stationSummary.RDS')
+saveRDS(stationSummary_sf, 'data/stationSummary_sf.RDS')
+
+write_csv(stationSummary, 'medianResults2010_2020.csv')
+st_write(stationSummary_sf, 'medianResults2010_2020.shp')
 ```
+
+
+## Analyze Results
+
+Now time for the cool stuff. We will break the results into two categories for each parameter as follows:
+* median TN < 1 mg/L
+* median TN > 2 mg/L
+* median TP < 0.05 mg/L
+* median TP > 0.1 mg/L
+
+```{r category thresholds}
+stationSummary_sf <- mutate(stationSummary, TNlevel = as.factor(case_when(medianTN < 1 ~ 'Low TN',
+                                                            medianTN >= 2 ~ 'High TN',
+                                                            TRUE ~ 'Medium TN')),
+                          TPlevel = as.factor(case_when(medianTP < 0.05 ~ 'Low TP',
+                                              medianTP >= 0.1 ~ 'High TP',
+                                              TRUE ~ 'Medium TP'))) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
+           remove = F, # dont remove these lat/lon cols from df
+           crs = 4326) 
+
+TNsummary <- filter(stationSummary_sf, !is.na(medianTN)) 
+TPsummary <- filter(stationSummary_sf, !is.na(medianTP))
+
+lowTN <- filter(stationSummary_sf, TNlevel == 'Low TN' )
+mediumTN <- filter(stationSummary_sf,  TNlevel == 'Medium TN')
+highTN <- filter(stationSummary_sf,  TNlevel == 'High TN')
+lowTP <- filter(stationSummary_sf,  TPlevel == 'Low TP')
+mediumTP <- filter(stationSummary_sf,  TPlevel == 'Medium TP')
+highTP <- filter(stationSummary_sf,  TPlevel == 'High TP')
+```
+
+Just for fun let's map it.
+
+```{r}
+library(inlmisc)
+library(leaflet)
+
+
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE, 
+                   options= leafletOptions(zoomControl = TRUE,minZoom = 3, maxZoom = 20,
+                                           preferCanvas = TRUE)) %>%
+  setView(-79.1, 37.7, zoom=7)  %>% 
+  addCircleMarkers(data = lowTN,
+                   color='black', fillColor= '#3aeb34', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Low Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(lowTN, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  addCircleMarkers(data = mediumTN,
+                   color='black', fillColor= '#f0e32b', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Medium Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(mediumTN, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  addCircleMarkers(data = highTN,
+                   color='black', fillColor='#eb4034', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="High Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(highTN, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  inlmisc::AddHomeButton(raster::extent(-83.89, -74.80, 36.54, 39.98), position = "topleft") %>%
+  addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                   overlayGroups = c("Low Median Total Nitrogen (2010 - 2020)", "Medium Median Total Nitrogen (2010 - 2020)",
+                                     "High Median Total Nitrogen (2010 - 2020)"),
+                   options=layersControlOptions(collapsed=T),
+                   position='topleft')
+
+```
+
+
+TP Map
+
+```{r}
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE, 
+                   options= leafletOptions(zoomControl = TRUE,minZoom = 3, maxZoom = 20,
+                                           preferCanvas = TRUE)) %>%
+  setView(-79.1, 37.7, zoom=7)  %>% 
+  addCircleMarkers(data = lowTP,
+                   color='black', fillColor= '#3aeb34', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Low Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(lowTP, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  addCircleMarkers(data = mediumTP,
+                   color='black', fillColor='#f0e32b',  fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Medium Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(mediumTP, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  addCircleMarkers(data = highTP,
+                   color='black', fillColor= '#eb4034', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="High Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(highTP, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  inlmisc::AddHomeButton(raster::extent(-83.89, -74.80, 36.54, 39.98), position = "topleft") %>%
+  addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                   overlayGroups = c("Low Median Total Phosphorus (2010 - 2020)",
+                                     "Medium Median Total Phosphorus (2010 - 2020)", "High Median Total Phosphorus (2010 - 2020)"),
+                   options=layersControlOptions(collapsed=T),
+                   position='topleft')
+```
+
+
+
+
+
+
+```{r}
+
+pal <- colorFactor(
+        palette = c('#3aeb34', '#f0e32b', '#eb4034'),
+        domain = levels(TNsummary$TNlevel))
+pal2 <- colorFactor(
+        palette = c('#3aeb34', '#f0e32b', '#eb4034'),
+        domain = levels(TPsummary$TPlevel))
+
+
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE, 
+                   options= leafletOptions(zoomControl = TRUE,minZoom = 3, maxZoom = 20,
+                                           preferCanvas = TRUE)) %>%
+  setView(-79.1, 37.7, zoom=7)  %>% 
+  addCircleMarkers(data = TNsummary,
+                   color='black', fillColor= ~pal(TNsummary$TNlevel), fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(TNsummary, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  addCircleMarkers(data = TPsummary,
+                   color='black', fillColor= ~pal2(TPsummary$TPlevel), fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(TPsummary, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  inlmisc::AddHomeButton(raster::extent(-83.89, -74.80, 36.54, 39.98), position = "topleft") %>%
+  addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                   overlayGroups = c("Median Total Nitrogen (2010 - 2020)", 'Median Total Phosphorus (2010 - 2020)'),
+                   options=layersControlOptions(collapsed=T),
+                   position='topleft')
+
+```
+
+

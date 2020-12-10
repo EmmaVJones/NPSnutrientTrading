@@ -1,0 +1,13 @@
+name: median_nutrient_results_2010_-_2020
+title: Median Nutrient Results 2010 - 2020
+username: ejones
+account: ejones
+server: deq-rstudio-prod
+hostUrl: http://deq-rstudio-prod:3939/__api__
+appId: 130
+bundleId: 815
+url: http://deq-rstudio-prod:3939/content/130/
+when: 1607628705.95641
+asMultiple: TRUE
+asStatic: FALSE
+ignoredFiles: medianResults2010_2020.csv|medianResults2010_2020.shp|NPS_ProjectOverview.Rmd

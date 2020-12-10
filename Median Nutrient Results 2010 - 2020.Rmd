@@ -1,0 +1,127 @@
+---
+title: "Median Nutrient Results 2010 - 2020"
+author: "Emma Jones"
+date: "12/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(tidyverse)
+library(sf)
+library(DT)
+library(inlmisc)
+library(leaflet)
+
+stationSummary <- readRDS('data/stationSummary.RDS')
+stationSummary_sf <- readRDS('data/stationSummary_sf.RDS')
+```
+
+## Project Overview
+
+This report analyzed all DEQ stations with Total Phosphorus (TP) and Total Nitrogen (TN) samples taken from 2010 to 2020. Median values and number of samples the statistic was based on (n) are presented in the table below. You may download the data by using the 'Copy' or 'Excel' buttons. The 'Column Visibility' button allows you to turn columns on/off. Sorting and and filtering are available as well. 
+
+```{r, warning=FALSE, message=FALSE, error=FALSE}
+datatable(stationSummary, rownames = F, escape= F, extensions = 'Buttons',
+                options = list(dom = 'Bift', scrollX= TRUE, scrollY = '300px',
+                               pageLength = nrow(stationSummary), buttons=list('copy','colvis', 'excel')))
+```
+
+To better visualize this data, we have broken the median results into the below categories:
+
+* Median TN < 1 mg/L is considered Low TN
+* Median TN >= 1 mg/L & Median TN < 2 mg/L is considered Medium TN
+* Median TN >= 2 mg/L is considered High TN
+* Median TP < 0.05 mg/L is considered Low TP
+* Median TP >= 0.05 mg/L & Median TN < 0.1 mg/L is considered Medium TP
+* Median TP >= 0.1 mg/L is considered High TP
+
+### Total Nitrogen Map
+
+Below is an interactive map of the results colored by different categories. The layers may be turned on/off using the drop down on the top left of the map. Click on a station to find out more information about the statistics.
+
+```{r category thresholds}
+stationSummary_sf <- mutate(stationSummary, TNlevel = as.factor(case_when(medianTN < 1 ~ 'Low TN',
+                                                            medianTN >= 2 ~ 'High TN',
+                                                            TRUE ~ 'Medium TN')),
+                          TPlevel = as.factor(case_when(medianTP < 0.05 ~ 'Low TP',
+                                              medianTP >= 0.1 ~ 'High TP',
+                                              TRUE ~ 'Medium TP'))) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
+           remove = F, # dont remove these lat/lon cols from df
+           crs = 4326) 
+
+TNsummary <- filter(stationSummary_sf, !is.na(medianTN)) 
+TPsummary <- filter(stationSummary_sf, !is.na(medianTP))
+
+lowTN <- filter(stationSummary_sf, TNlevel == 'Low TN' )
+mediumTN <- filter(stationSummary_sf,  TNlevel == 'Medium TN')
+highTN <- filter(stationSummary_sf,  TNlevel == 'High TN')
+lowTP <- filter(stationSummary_sf,  TPlevel == 'Low TP')
+mediumTP <- filter(stationSummary_sf,  TPlevel == 'Medium TP')
+highTP <- filter(stationSummary_sf,  TPlevel == 'High TP')
+```
+
+```{r TN map}
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE, 
+                   options= leafletOptions(zoomControl = TRUE,minZoom = 3, maxZoom = 20,
+                                           preferCanvas = TRUE)) %>%
+  setView(-79.1, 37.7, zoom=7)  %>% 
+  addCircleMarkers(data = lowTN,
+                   color='black', fillColor= '#3aeb34', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Low Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(lowTN, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  addCircleMarkers(data = mediumTN,
+                   color='black', fillColor= '#f0e32b', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Medium Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(mediumTN, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  addCircleMarkers(data = highTN,
+                   color='black', fillColor='#eb4034', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="High Median Total Nitrogen (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(highTN, zcol=c('Fdt_Sta_Id', 'medianTN', 'nTN'))) %>%
+  inlmisc::AddHomeButton(raster::extent(-83.89, -74.80, 36.54, 39.98), position = "topleft") %>%
+  addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                   overlayGroups = c("Low Median Total Nitrogen (2010 - 2020)", "Medium Median Total Nitrogen (2010 - 2020)",
+                                     "High Median Total Nitrogen (2010 - 2020)"),
+                   options=layersControlOptions(collapsed=T),
+                   position='topleft')
+```
+
+
+### Total Phosphorus Map
+
+Below is an interactive map of the results colored by different categories. The layers may be turned on/off using the drop down on the top left of the map. Click on a station to find out more information about the statistics.
+
+```{r}
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE, 
+                   options= leafletOptions(zoomControl = TRUE,minZoom = 3, maxZoom = 20,
+                                           preferCanvas = TRUE)) %>%
+  setView(-79.1, 37.7, zoom=7)  %>% 
+  addCircleMarkers(data = lowTP,
+                   color='black', fillColor= '#3aeb34', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Low Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(lowTP, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  addCircleMarkers(data = mediumTP,
+                   color='black', fillColor='#f0e32b',  fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="Medium Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(mediumTP, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  addCircleMarkers(data = highTP,
+                   color='black', fillColor= '#eb4034', fillOpacity = 0.5, stroke=0.1, radius = 4,
+                   weight = 2, group="High Median Total Phosphorus (2010 - 2020)",
+                   label = ~Fdt_Sta_Id, layerId = ~Fdt_Sta_Id,
+                   popup = leafpop::popupTable(highTP, zcol=c('Fdt_Sta_Id', 'medianTP', 'nTP'))) %>%
+  inlmisc::AddHomeButton(raster::extent(-83.89, -74.80, 36.54, 39.98), position = "topleft") %>%
+  addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                   overlayGroups = c("Low Median Total Phosphorus (2010 - 2020)",
+                                     "Medium Median Total Phosphorus (2010 - 2020)", "High Median Total Phosphorus (2010 - 2020)"),
+                   options=layersControlOptions(collapsed=T),
+                   position='topleft')
+```
+
+
+
