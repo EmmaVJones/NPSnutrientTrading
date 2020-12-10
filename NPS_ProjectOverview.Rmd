@@ -7,14 +7,13 @@ output: html_document
 knitr::opts_chunk$set(echo = FALSE)
 
 # written in R 3.6.2
-
 library(tidyverse)
 library(sf)
 library(config)
 library(pins)
 library(pool)
 library(DBI) # for dataset testing but use pool for any real work
-
+library(lubridate)
 ```
 
 ## Background
@@ -29,18 +28,91 @@ Note the "low" nutrient stations need to have low TN and TP and the "high" nutri
 ## Establish connection to ODS
 
 ```{r ODS connection}
+# get configuration settings
+conn <- config::get("connectionSettings")
+# use API key to register board
+board_register_rsconnect(key = conn$CONNECT_API_KEY,  #Sys.getenv("CONNECT_API_KEY"),
+                          server = conn$CONNECT_SERVER)#Sys.getenv("CONNECT_SERVER"))
+# establish db connection on server
+pool <- dbPool(
+  drv = odbc::odbc(),
+  Driver = "SQL Server Native Client 11.0", 
+  Server= "DEQ-SQLODS-PROD,50000",
+  dbname = "ODS",
+  trusted_connection = "yes"
+)
+
+```
+
+## Start Small, Single Station Pull
+
+### Station Data
+
+```{r establish station}
+station <- '2-JKS023.61'
+```
+
+Pull Station Field and location data. We need `Wqm_Field_Data_View$Fdt_Id` to get the appropriate analyte data from `Wqm_Analytes_View$Ana_Sam_Fdt_Id`.
+
+```{r field data}
+stationFieldData <- pool %>% tbl("Wqm_Field_Data_View") %>%
+  filter(Fdt_Sta_Id %in% !! station &
+           year(Fdt_Date_Time) >= year(!! Sys.Date()) - 10) %>% # limit to last 10 years of data on database side
+  as_tibble()
+
+stationGeospatial <- pool %>% tbl("WQM_Sta_GIS_View") %>%
+  filter(Station_Id %in% !!station) %>%
+  as_tibble()
+```
+
+There is a unique Fdt_Id for each sample event. We need these Fdt_Id's to filter the appropriate analyte data.
+
+```{r analyte data}
+stationAnalyteData <- pool %>% tbl("Wqm_Analytes_View") %>%
+  filter(Ana_Sam_Fdt_Id %in% !! stationFieldData$Fdt_Id &
+           year(Ana_Received_Date) >= year(!! Sys.Date()) - 10) %>% # limit to last 10 years of data on database side
+  as_tibble() %>%
+  left_join(dplyr::select(stationFieldData, Fdt_Id, Fdt_Sta_Id, Fdt_Date_Time), by = c("Ana_Sam_Fdt_Id" = "Fdt_Id")) 
+```
+
+Keep only the nutrient data we want.
+
+```{r just nutrients}
+stationNutrientData <-  stationAnalyteData %>%
+    group_by(Ana_Sam_Fdt_Id, Fdt_Sta_Id, Fdt_Date_Time)%>%
+    filter(Pg_Storet_Code == '00600' )%>%
+    summarise(NITROGEN = sum(Ana_Value)) %>% # use conventionals new naming format
+  left_join(stationAnalyteData %>%
+              group_by(Ana_Sam_Fdt_Id, Fdt_Sta_Id, Fdt_Date_Time)%>%
+              filter(Pg_Storet_Code == '00665' ) %>%
+              summarise(PHOSPHORUS = sum(Ana_Value)), # use conventionals new naming format
+            by = c('Ana_Sam_Fdt_Id','Fdt_Sta_Id', 'Fdt_Date_Time')) %>%
+  ungroup()
+
+```
+Get summary statistics and join spatial information.
+
+```{r stats and geospatial}
+stationSummary <- stationNutrientData %>%
+  group_by(Fdt_Sta_Id) %>%
+  filter(!is.na(NITROGEN)) %>%
+  summarise(medianTN = median(NITROGEN, na.rm = T),
+            nTN = n()) %>%
+  left_join(stationNutrientData %>% 
+              group_by(Fdt_Sta_Id) %>%
+              filter(!is.na(PHOSPHORUS)) %>%
+              summarise(medianTP = median(PHOSPHORUS, na.rm = T),
+                        nTP = n())) %>%
+  left_join(dplyr::select(stationGeospatial, Station_Id, Latitude, Longitude, Deq_Region, County_City, Basin, Huc6_Vahu6, Huc6_Huc_8_Name),
+            by = c('Fdt_Sta_Id' = 'Station_Id')) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"),  # make spatial layer using these columns
+           remove = T, # remove these lat/lon cols from df
+           crs = 4326) 
 
 ```
 
 
 
-```{r}
-# To join analytes with field data you need the Fdt_ID i.e. Ana_Sam_Fdt_Id =Fdt_Id
-DCLS_Analytes= pool %>% tbl("Wqm_Analytes_View") %>%
-filter(Ana_Sam_Fdt_Id %in% !!ProbMon_Fdt_Ids$Fdt_Id) %>%
-as_tibble()%>%
-left_join(ProbMon_Fdt_Ids,by=c("Ana_Sam_Fdt_Id"="Fdt_Id"))%>%
-mutate(Year=year(Ana_Received_Date)) 
-```
+## Multistation Data Query
 
-
+First we want to only pull info from stations that have TN or TP data in the last 10 years.
